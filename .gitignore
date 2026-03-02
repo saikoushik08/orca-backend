@@ -1,0 +1,35 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+venv_method2/
+
+# Environment files
+.env
+
+# Databases
+*.db
+
+# Uploads & Outputs
+uploads/
+outputs/
+workspace/
+
+# Test reconstruction data
+colmap_test/
+polycam_test/
+Ammonite/
+
+# Nerfstudio artifacts
+nerfstudio_outputs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
