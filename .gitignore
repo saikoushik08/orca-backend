@@ -7,6 +7,11 @@ __pycache__/
 # Virtual environments
 venv/
 venv_method2/
+venv_mask/
+venv_pointr/
+
+# External repos
+PoinTr/
 
 # Environment files
 .env
@@ -23,6 +28,9 @@ workspace/
 colmap_test/
 polycam_test/
 Ammonite/
+
+# Reconstruction / experiment data
+data/
 
 # Nerfstudio artifacts
 nerfstudio_outputs/
