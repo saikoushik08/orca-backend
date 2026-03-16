@@ -30,7 +30,7 @@ polycam_test/
 Ammonite/
 
 # Reconstruction / experiment data
-data/
+
 
 # Nerfstudio artifacts
 nerfstudio_outputs/
