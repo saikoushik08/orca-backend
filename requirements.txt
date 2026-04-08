@@ -1,4 +1,16 @@
 fastapi
 uvicorn
 python-dotenv
+python-multipart
 supabase
+pydantic
+sqlalchemy
+numpy
+scipy
+opencv-python
+pillow
+matplotlib
+open3d
+trimesh
+scikit-image
+scikit-learn

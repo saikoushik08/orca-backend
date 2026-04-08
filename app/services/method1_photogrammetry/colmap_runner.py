@@ -1,6 +1,6 @@
 import subprocess
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 # Absolute path to COLMAP executable (Windows + CUDA)
 COLMAP_EXE = Path(
@@ -13,7 +13,7 @@ def run_colmap_sfm(images_dir: Path, workspace_dir: Path) -> Path:
     Runs COLMAP sparse reconstruction (Structure-from-Motion).
 
     Pipeline:
-    images → feature extraction → matching → sparse mapping
+    images -> feature extraction -> matching -> sparse mapping
 
     Args:
         images_dir (Path): Directory containing ONLY input images
@@ -29,6 +29,10 @@ def run_colmap_sfm(images_dir: Path, workspace_dir: Path) -> Path:
     if not images_dir.exists():
         raise FileNotFoundError(f"Images directory not found: {images_dir}")
 
+    image_files = [p for p in images_dir.iterdir() if p.is_file()]
+    if not image_files:
+        raise FileNotFoundError(f"No images found in: {images_dir}")
+
     if not COLMAP_EXE.exists():
         raise FileNotFoundError(f"COLMAP executable not found: {COLMAP_EXE}")
 
@@ -37,18 +41,21 @@ def run_colmap_sfm(images_dir: Path, workspace_dir: Path) -> Path:
     sparse_dir = colmap_dir / "sparse"
     colmap_images_dir = colmap_dir / "images"
 
-    # Prepare directories
     colmap_dir.mkdir(parents=True, exist_ok=True)
     sparse_dir.mkdir(parents=True, exist_ok=True)
 
-    # Copy images into COLMAP-controlled directory
-    if colmap_images_dir.exists():
-        shutil.rmtree(colmap_images_dir)
-    shutil.copytree(images_dir, colmap_images_dir)
+    if database_path.exists():
+        database_path.unlink()
+
+    if images_dir.resolve() != colmap_images_dir.resolve():
+        if colmap_images_dir.exists():
+            shutil.rmtree(colmap_images_dir)
+        shutil.copytree(images_dir, colmap_images_dir)
+    else:
+        print(f"[COLMAP] Using existing workspace images directory: {colmap_images_dir}")
 
     try:
         print("[COLMAP] Feature extraction (GPU)")
-
         subprocess.run(
             [
                 str(COLMAP_EXE),
@@ -62,7 +69,6 @@ def run_colmap_sfm(images_dir: Path, workspace_dir: Path) -> Path:
         )
 
         print("[COLMAP] Feature matching (GPU)")
-
         subprocess.run(
             [
                 str(COLMAP_EXE),
@@ -74,7 +80,6 @@ def run_colmap_sfm(images_dir: Path, workspace_dir: Path) -> Path:
         )
 
         print("[COLMAP] Sparse mapping")
-
         subprocess.run(
             [
                 str(COLMAP_EXE),
@@ -87,14 +92,12 @@ def run_colmap_sfm(images_dir: Path, workspace_dir: Path) -> Path:
         )
 
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"COLMAP failed: {e}")
+        raise RuntimeError(f"COLMAP sparse reconstruction failed: {e}")
 
-    # COLMAP outputs models as sparse/0, sparse/1, ...
     model_dirs = sorted(p for p in sparse_dir.iterdir() if p.is_dir())
 
     if not model_dirs:
         raise RuntimeError("COLMAP completed but no sparse model was generated")
 
     print(f"[COLMAP] Sparse model generated at: {model_dirs[0]}")
-
     return model_dirs[0]

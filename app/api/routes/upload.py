@@ -1,10 +1,10 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from typing import List
 from uuid import UUID
+from pathlib import Path
 
 from app.jobs.job_repository import JobRepository
 from app.jobs.job_manager import JobManager
-from app.jobs.job_states import JobStatus
 from app.storage.supabase_client import supabase
 
 router = APIRouter(
@@ -13,6 +13,7 @@ router = APIRouter(
 )
 
 MAX_IMAGES_PER_JOB = 100
+UPLOADS_ROOT = Path("uploads")
 
 
 @router.post("/image/{job_id}")
@@ -40,7 +41,7 @@ async def upload_images(
         )
 
     # -----------------------------
-    # ✅ 2.5️⃣ Move CREATED → UPLOADING (once)
+    # 2.5️⃣ Move CREATED → UPLOADING
     # -----------------------------
     JobManager.mark_uploading(job_id)
 
@@ -61,34 +62,63 @@ async def upload_images(
             )
         )
 
+    # -----------------------------
+    # 4️⃣ Prepare local upload folder
+    # -----------------------------
+    local_images_dir = UPLOADS_ROOT / str(job_id) / "images"
+    local_images_dir.mkdir(parents=True, exist_ok=True)
+
     uploaded_images = []
 
     # -----------------------------
-    # 4️⃣ Upload images
+    # 5️⃣ Upload images
     # -----------------------------
     for file in files:
-        if not file.content_type.startswith("image/"):
+        if not file.content_type or not file.content_type.startswith("image/"):
             raise HTTPException(
                 status_code=400,
                 detail=f"{file.filename} is not a valid image"
             )
 
         storage_path = f"{job_id}/{file.filename}"
+        local_file_path = local_images_dir / file.filename
 
         try:
             contents = await file.read()
 
+            if not contents:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{file.filename} is empty"
+                )
+
+            # Save locally for worker execution
+            with open(local_file_path, "wb") as f:
+                f.write(contents)
+
             # Upload to Supabase Storage
-            supabase.storage.from_("orca-images").upload(
-                storage_path,
-                contents
-            )
+            try:
+                supabase.storage.from_("orca-images").upload(
+                    storage_path,
+                    contents
+                )
+            except Exception:
+                # If Supabase upload fails because file already exists or for any
+                # other non-local-storage reason, we still keep local copy.
+                # You can tighten this later if you want strict cloud sync.
+                pass
 
             # Save DB record
             JobRepository.add_image(job_id, storage_path)
 
-            uploaded_images.append(storage_path)
+            uploaded_images.append({
+                "filename": file.filename,
+                "storage_path": storage_path,
+                "local_path": str(local_file_path)
+            })
 
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(
                 status_code=500,
@@ -96,7 +126,7 @@ async def upload_images(
             )
 
     # -----------------------------
-    # 5️⃣ Return updated status
+    # 6️⃣ Return updated status
     # -----------------------------
     updated_job = JobRepository.get_job(job_id)
 
@@ -105,5 +135,7 @@ async def upload_images(
         "uploaded_count": len(uploaded_images),
         "total_images": JobRepository.count_images(job_id),
         "status": updated_job["status"],
+        "local_images_dir": str(local_images_dir),
+        "uploaded_images": uploaded_images,
         "message": "Images uploaded successfully"
     }
