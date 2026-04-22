@@ -2,6 +2,8 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from typing import List
 from uuid import UUID
 from pathlib import Path
+import traceback
+import asyncio
 
 from app.jobs.job_repository import JobRepository
 from app.jobs.job_manager import JobManager
@@ -12,7 +14,7 @@ router = APIRouter(
     tags=["Uploads"]
 )
 
-MAX_IMAGES_PER_JOB = 100
+MAX_IMAGES_PER_JOB = 500
 UPLOADS_ROOT = Path("uploads")
 
 
@@ -84,32 +86,28 @@ async def upload_images(
         local_file_path = local_images_dir / file.filename
 
         try:
-            contents = await file.read()
-
-            if not contents:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{file.filename} is empty"
-                )
-
-            # Save locally for worker execution
+            # Safely stream the file to local disk first
             with open(local_file_path, "wb") as f:
-                f.write(contents)
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
 
-            # Upload to Supabase Storage
+            # Upload to Cloud Storage
             try:
-                supabase.storage.from_("orca-images").upload(
-                    storage_path,
-                    contents
-                )
-            except Exception:
-                # If Supabase upload fails because file already exists or for any
-                # other non-local-storage reason, we still keep local copy.
-                # You can tighten this later if you want strict cloud sync.
-                pass
+                with open(local_file_path, "rb") as f:
+                    file_bytes = f.read()
+                    supabase.storage.from_("orca-images").upload(storage_path, file_bytes)
+                
+                JobRepository.add_image(job_id, storage_path)
+                
+                # 🛑 FIX: Add a tiny 50ms delay between cloud uploads.
+                # This prevents Supabase from dropping connections due to rapid connection bursting!
+                await asyncio.sleep(0.05)
 
-            # Save DB record
-            JobRepository.add_image(job_id, storage_path)
+            except Exception as cloud_err:
+                print(f"⚠️ Cloud sync skipped for {file.filename}: {cloud_err}")
 
             uploaded_images.append({
                 "filename": file.filename,
@@ -120,6 +118,8 @@ async def upload_images(
         except HTTPException:
             raise
         except Exception as e:
+            print(f"❌ CRITICAL ERROR saving {file.filename}:")
+            traceback.print_exc()
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to upload {file.filename}: {str(e)}"
